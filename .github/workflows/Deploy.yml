@@ -147,48 +147,9 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-
-            $ErrorActionPreference = "Stop"
-
-            $release = "C:\Deploy\releases\release.zip"
-            $temp = "C:\Deploy\temp"
-            $site = "C:\Users\Francisco\Desktop\test"
-
-            if(Test-Path $temp){
-                Remove-Item $temp -Recurse -Force
-            }
-
-            New-Item -ItemType Directory -Path $temp -Force | Out-Null
-
-            Expand-Archive `
-                -Path $release `
-                -DestinationPath $temp `
-                -Force
-
-            robocopy `
-                $temp `
-                $site `
-                /MIR `
-                /XD storage logs `
-                /XF .env
-
-            if($LASTEXITCODE -gt 7){
-                throw "Robocopy failed with code $LASTEXITCODE"
-            }
-
-            Set-Location $site
-
-            C:\PHP\php.exe artisan migrate --force
-
-            C:\PHP\php.exe artisan optimize
-
-            Import-Module WebAdministration
-
-            Restart-WebAppPool "test_github_actions"
-
-            Remove-Item $temp -Recurse -Force
-
-            Write-Host ""
-            Write-Host "=================================="
-            Write-Host "Deployment Completed Successfully"
-            Write-Host "=================================="
+            powershell -ExecutionPolicy Bypass -File C:\Deploy\deploy.ps1
+      
+                  Write-Host ""
+                  Write-Host "=================================="
+                  Write-Host "Deployment Completed Successfully"
+                  Write-Host "=================================="
