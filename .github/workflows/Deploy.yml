@@ -1,0 +1,194 @@
+name: Laravel Deploy (Windows IIS)
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      PHP_VERSION: "8.3"
+      NODE_VERSION: "22"
+
+    steps:
+      ####################################################################
+      # Checkout
+      ####################################################################
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      ####################################################################
+      # PHP
+      ####################################################################
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+          extensions: >
+            bcmath,
+            ctype,
+            curl,
+            dom,
+            fileinfo,
+            filter,
+            intl,
+            mbstring,
+            openssl,
+            pdo,
+            pdo_mysql,
+            tokenizer,
+            xml,
+            zip
+
+      ####################################################################
+      # Composer Cache
+      ####################################################################
+      - name: Get Composer Cache Directory
+        id: composer-cache
+        run: |
+          echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            composer-${{ runner.os }}-
+
+      ####################################################################
+      # Node
+      ####################################################################
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      ####################################################################
+      # Install Dependencies
+      ####################################################################
+      - name: Install Composer Dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      ####################################################################
+      # Build Assets
+      ####################################################################
+      - name: Build Frontend
+        run: npm run build
+
+      ####################################################################
+      # Prepare Laravel
+      ####################################################################
+      - name: Create Environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      ####################################################################
+      # Tests
+      ####################################################################
+      - name: Run Tests
+        run: php artisan test
+
+      ####################################################################
+      # Cleanup before packaging
+      ####################################################################
+      - name: Remove Development Files
+        run: |
+          rm -rf .git
+          rm -rf .github
+          rm -rf node_modules
+          rm -rf tests
+
+      ####################################################################
+      # Create ZIP
+      ####################################################################
+      - name: Create Deployment ZIP
+        run: |
+          zip -r release.zip . \
+            -x "*.git*" \
+            -x ".github/*" \
+            -x "tests/*" \
+            -x "node_modules/*" \
+            -x "storage/logs/*" \
+            -x ".env"
+
+      ####################################################################
+      # Upload artifact to server
+      ####################################################################
+      - name: Upload Release
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "release.zip"
+          target: "C:/Deploy/releases"
+
+      ####################################################################
+      # Execute Deployment
+      ####################################################################
+      - name: Deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+
+            $ErrorActionPreference = "Stop"
+
+            $release = "C:\Deploy\releases\release.zip"
+            $temp = "C:\Deploy\temp"
+            $site = "C:\Users\Francisco\Desktop\test"
+
+            if(Test-Path $temp){
+                Remove-Item $temp -Recurse -Force
+            }
+
+            New-Item -ItemType Directory -Path $temp -Force | Out-Null
+
+            Expand-Archive `
+                -Path $release `
+                -DestinationPath $temp `
+                -Force
+
+            robocopy `
+                $temp `
+                $site `
+                /MIR `
+                /XD storage logs `
+                /XF .env
+
+            if($LASTEXITCODE -gt 7){
+                throw "Robocopy failed with code $LASTEXITCODE"
+            }
+
+            Set-Location $site
+
+            C:\PHP\php.exe artisan migrate --force
+
+            C:\PHP\php.exe artisan optimize
+
+            Import-Module WebAdministration
+
+            Restart-WebAppPool "test_github_actions"
+
+            Remove-Item $temp -Recurse -Force
+
+            Write-Host ""
+            Write-Host "=================================="
+            Write-Host "Deployment Completed Successfully"
+            Write-Host "=================================="
