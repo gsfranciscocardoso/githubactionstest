@@ -1,155 +1,566 @@
-name: Laravel Deploy (Windows IIS)
+name: Laravel Production Deployment
 
 on:
   push:
     branches:
       - main
 
+  workflow_dispatch:
+
 concurrency:
   group: production
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+
   deploy:
+
+    name: Build & Deploy
+
     runs-on: ubuntu-latest
 
     env:
+
       PHP_VERSION: "8.3"
+
       NODE_VERSION: "22"
 
+      DEPLOY_PACKAGE: release.zip
+
+      REMOTE_RELEASE: C:/Deploy/releases/release.zip
+
+      REMOTE_TEMP: C:/Deploy/temp
+
+      REMOTE_SITE: C:/Users/Francisco/Desktop/test
+
+      REMOTE_PHP: C:/PHP/php.exe
+
+      REMOTE_APPPOOL: test_github_actions
+
     steps:
-      ####################################################################
-      # Checkout
-      ####################################################################
-      - name: Checkout Repository
-        uses: actions/checkout@v4
 
-      ####################################################################
-      # PHP
-      ####################################################################
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ env.PHP_VERSION }}
-          coverage: none
-          extensions: >
-            bcmath,
-            ctype,
-            curl,
-            dom,
-            fileinfo,
-            filter,
-            intl,
-            mbstring,
-            openssl,
-            pdo,
-            pdo_mysql,
-            tokenizer,
-            xml,
-            zip
+    ###########################################################
+    # Checkout
+    ###########################################################
 
-      ####################################################################
-      # Composer Cache
-      ####################################################################
-      - name: Get Composer Cache Directory
-        id: composer-cache
-        run: |
-          echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Cache Composer
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.composer-cache.outputs.dir }}
-          key: composer-${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            composer-${{ runner.os }}-
+    ###########################################################
+    # PHP
+    ###########################################################
 
-      ####################################################################
-      # Node
-      ####################################################################
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
 
-      ####################################################################
-      # Install Dependencies
-      ####################################################################
-      - name: Install Composer Dependencies
-        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+      with:
 
-      - name: Install NPM Dependencies
-        run: npm ci
+        php-version: ${{ env.PHP_VERSION }}
 
-      ####################################################################
-      # Build Assets
-      ####################################################################
-      - name: Build Frontend
-        run: npm run build
+        coverage: none
 
-      ####################################################################
-      # Prepare Laravel
-      ####################################################################
-      - name: Create Environment
-        run: |
-          cp .env.example .env
-          php artisan key:generate
+        extensions: >
 
-      ####################################################################
-      # Tests
-      ####################################################################
-      - name: Run Tests
-        run: php artisan test
+          bcmath,
 
-      ####################################################################
-      # Cleanup before packaging
-      ####################################################################
-      - name: Remove Development Files
-        run: |
-          rm -rf .git
-          rm -rf .github
-          rm -rf node_modules
-          rm -rf tests
+          curl,
 
-      ####################################################################
-      # Create ZIP
-      ####################################################################
-      - name: Create Deployment ZIP
-        run: |
-          zip -r release.zip . \
-            -x "*.git*" \
-            -x ".github/*" \
-            -x "tests/*" \
-            -x "node_modules/*" \
-            -x "storage/logs/*" \
-            -x ".env"
+          dom,
 
-      ####################################################################
-      # Upload artifact to server
-      ####################################################################
-      - name: Upload Release
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "release.zip"
-          target: "C:/Deploy/releases"
+          fileinfo,
 
-      ####################################################################
-      # Execute Deployment
-      ####################################################################
-      - name: Deploy
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            powershell -ExecutionPolicy Bypass -File C:\Deploy\deploy.ps1
-      
-                  Write-Host ""
-                  Write-Host "=================================="
-                  Write-Host "Deployment Completed Successfully"
-                  Write-Host "=================================="
+          intl,
+
+          mbstring,
+
+          openssl,
+
+          pdo,
+
+          pdo_mysql,
+
+          tokenizer,
+
+          xml,
+
+          zip
+
+    ###########################################################
+    # Composer Cache
+    ###########################################################
+
+    - name: Determine Composer Cache Directory
+
+      id: composer-cache
+
+      run: |
+
+        echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Composer
+
+      uses: actions/cache@v4
+
+      with:
+
+        path: ${{ steps.composer-cache.outputs.dir }}
+
+        key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+
+        restore-keys: |
+
+          composer-${{ runner.os }}-
+
+    ###########################################################
+    # Node
+    ###########################################################
+
+    - name: Setup Node.js
+
+      uses: actions/setup-node@v4
+
+      with:
+
+        node-version: ${{ env.NODE_VERSION }}
+
+        cache: npm
+
+    ###########################################################
+    # Install Dependencies
+    ###########################################################
+
+    - name: Install Composer Dependencies
+
+      run: |
+
+        composer install \
+          --no-dev \
+          --prefer-dist \
+          --optimize-autoloader \
+          --no-interaction
+
+    - name: Install Node Dependencies
+
+      run: |
+
+        npm ci
+
+    ###########################################################
+    # Build Assets
+    ###########################################################
+
+    - name: Build Vite Assets
+
+      run: |
+
+        npm run build
+
+    ###########################################################
+    # Prepare Laravel
+    ###########################################################
+
+    - name: Prepare Laravel
+
+      run: |
+
+        cp .env.example .env
+
+        php artisan key:generate
+
+    ###########################################################
+    # Tests
+    ###########################################################
+
+    - name: Run Laravel Tests
+
+      run: |
+
+        php artisan test
+
+        ###########################################################
+    # Cleanup before packaging
+    ###########################################################
+
+    - name: Remove files not required for production
+
+      run: |
+
+        rm -rf .git
+
+        rm -rf .github
+
+        rm -rf tests
+
+        rm -rf node_modules
+
+    ###########################################################
+    # Create Deployment Package
+    ###########################################################
+
+    - name: Create Deployment ZIP
+
+      run: |
+
+        zip -r "${{ env.DEPLOY_PACKAGE }}" . \
+          -x ".git/*" \
+          -x ".github/*" \
+          -x "node_modules/*" \
+          -x "tests/*" \
+          -x ".env" \
+          -x "storage/logs/*" \
+          -x "storage/framework/cache/*" \
+          -x "storage/framework/sessions/*" \
+          -x "storage/framework/testing/*" \
+          -x "storage/framework/views/*"
+
+    ###########################################################
+    # Verify ZIP
+    ###########################################################
+
+    - name: Verify package
+
+      run: |
+
+        ls -lh "${{ env.DEPLOY_PACKAGE }}"
+
+        unzip -t "${{ env.DEPLOY_PACKAGE }}"
+
+    ###########################################################
+    # Upload package
+    ###########################################################
+
+    - name: Upload deployment package
+
+      uses: appleboy/scp-action@v0.1.7
+
+      with:
+
+        host: ${{ secrets.SSH_HOST }}
+
+        username: ${{ secrets.SSH_USER }}
+
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+        source: ${{ env.DEPLOY_PACKAGE }}
+
+        target: C:/Deploy/releases
+
+        overwrite: true
+
+    ###########################################################
+    # Extract package
+    ###########################################################
+
+    - name: Extract release on server
+
+      uses: appleboy/ssh-action@v1.2.0
+
+      with:
+
+        host: ${{ secrets.SSH_HOST }}
+
+        username: ${{ secrets.SSH_USER }}
+
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+        script: |
+
+          $ErrorActionPreference="Stop"
+
+          if(Test-Path "${{ env.REMOTE_TEMP }}")
+          {
+              Remove-Item "${{ env.REMOTE_TEMP }}" -Force -Recurse
+          }
+
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path "${{ env.REMOTE_TEMP }}" | Out-Null
+
+          Expand-Archive `
+              -Path "${{ env.REMOTE_RELEASE }}" `
+              -DestinationPath "${{ env.REMOTE_TEMP }}" `
+              -Force
+
+          Write-Host "Release extracted successfully."
+
+          ###########################################################
+    # Deploy Application
+    ###########################################################
+
+    - name: Deploy application
+
+      uses: appleboy/ssh-action@v1.2.0
+
+      with:
+
+        host: ${{ secrets.SSH_HOST }}
+
+        username: ${{ secrets.SSH_USER }}
+
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+        script: |
+
+          $ErrorActionPreference = "Stop"
+
+          $Site = "${{ env.REMOTE_SITE }}"
+
+          $Temp = "${{ env.REMOTE_TEMP }}"
+
+          $Php = "${{ env.REMOTE_PHP }}"
+
+          ###################################################
+          # Enable maintenance mode
+          ###################################################
+
+          if(Test-Path "$Site\artisan")
+          {
+              Set-Location $Site
+
+              & $Php artisan down --render="errors::503" --retry=60
+          }
+
+          ###################################################
+          # Preserve .env
+          ###################################################
+
+          if(Test-Path "$Site\.env")
+          {
+              Copy-Item `
+                  "$Site\.env" `
+                  "$Temp\.env.production" `
+                  -Force
+          }
+
+          ###################################################
+          # Preserve storage
+          ###################################################
+
+          if(Test-Path "$Site\storage")
+          {
+              robocopy `
+                  "$Site\storage" `
+                  "$Temp\storage" `
+                  /E
+
+              if($LASTEXITCODE -gt 7)
+              {
+                  throw "Unable to backup storage."
+              }
+          }
+
+          ###################################################
+          # Synchronise application
+          ###################################################
+
+          robocopy `
+              "$Temp" `
+              "$Site" `
+              /MIR `
+              /R:2 `
+              /W:2 `
+              /XD storage `
+              /XF .env
+
+          if($LASTEXITCODE -gt 7)
+          {
+              throw "Application deployment failed."
+          }
+
+          ###################################################
+          # Restore .env
+          ###################################################
+
+          if(Test-Path "$Temp\.env.production")
+          {
+              Move-Item `
+                  "$Temp\.env.production" `
+                  "$Site\.env" `
+                  -Force
+          }
+
+          ###################################################
+          # Restore storage
+          ###################################################
+
+          if(Test-Path "$Temp\storage")
+          {
+              robocopy `
+                  "$Temp\storage" `
+                  "$Site\storage" `
+                  /E
+
+              if($LASTEXITCODE -gt 7)
+              {
+                  throw "Unable to restore storage."
+              }
+          }
+
+          ###################################################
+          # Ensure required folders exist
+          ###################################################
+
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path "$Site\storage\logs" `
+              | Out-Null
+
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path "$Site\bootstrap\cache" `
+              | Out-Null
+
+          ###################################################
+          # IIS permissions
+          ###################################################
+
+          icacls `
+              "$Site\storage" `
+              /grant "IIS_IUSRS:(OI)(CI)M" `
+              /T
+
+          icacls `
+              "$Site\bootstrap\cache" `
+              /grant "IIS_IUSRS:(OI)(CI)M" `
+              /T
+
+
+          ###########################################################
+    # Laravel Optimisation
+    ###########################################################
+
+    - name: Finalise deployment
+
+      uses: appleboy/ssh-action@v1.2.0
+
+      with:
+
+        host: ${{ secrets.SSH_HOST }}
+
+        username: ${{ secrets.SSH_USER }}
+
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+        script: |
+
+          $ErrorActionPreference = "Stop"
+
+          $Site = "${{ env.REMOTE_SITE }}"
+          $Php = "${{ env.REMOTE_PHP }}"
+          $AppPool = "${{ env.REMOTE_APPPOOL }}"
+          $Temp = "${{ env.REMOTE_TEMP }}"
+          $Release = "${{ env.REMOTE_RELEASE }}"
+
+          Set-Location $Site
+
+          ###################################################
+          # Laravel
+          ###################################################
+
+          Write-Host "Clearing caches..."
+
+          & $Php artisan optimize:clear
+
+          Write-Host "Running migrations..."
+
+          & $Php artisan migrate --force
+
+          Write-Host "Caching configuration..."
+
+          & $Php artisan config:cache
+
+          Write-Host "Caching routes..."
+
+          & $Php artisan route:cache
+
+          Write-Host "Caching views..."
+
+          & $Php artisan view:cache
+
+          Write-Host "Caching events..."
+
+          & $Php artisan event:cache
+
+          ###################################################
+          # Bring application online
+          ###################################################
+
+          Write-Host "Disabling maintenance mode..."
+
+          & $Php artisan up
+
+          ###################################################
+          # Restart IIS
+          ###################################################
+
+          Import-Module WebAdministration
+
+          Write-Host "Restarting IIS App Pool..."
+
+          Restart-WebAppPool $AppPool
+
+          ###################################################
+          # Cleanup
+          ###################################################
+
+          if(Test-Path $Temp)
+          {
+              Remove-Item `
+                  $Temp `
+                  -Recurse `
+                  -Force
+          }
+
+          if(Test-Path $Release)
+          {
+              Remove-Item `
+                  $Release `
+                  -Force
+          }
+
+          ###################################################
+          # Verify deployment
+          ###################################################
+
+          if(!(Test-Path "$Site\artisan"))
+          {
+              throw "artisan file not found after deployment."
+          }
+
+          Write-Host ""
+          Write-Host "======================================="
+          Write-Host " Laravel deployment completed!"
+          Write-Host "======================================="
+
+    ###########################################################
+    # Optional HTTP Health Check
+    ###########################################################
+
+    # Uncomment and change the URL when your application
+    # is reachable from the GitHub runner.
+
+    # - name: Health Check
+    #   run: |
+    #     curl --fail https://your-domain.com
+
+    ###########################################################
+    # Upload logs on failure
+    ###########################################################
+
+    - name: Upload logs
+      if: failure()
+
+      uses: actions/upload-artifact@v4
+
+      with:
+
+        name: deployment-logs
+
+        path: |
+          storage/logs
