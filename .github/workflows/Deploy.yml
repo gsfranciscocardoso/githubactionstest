@@ -137,7 +137,6 @@ jobs:
       run: |
 
         composer install \
-          --no-dev \
           --prefer-dist \
           --optimize-autoloader \
           --no-interaction
@@ -174,11 +173,39 @@ jobs:
     # Tests
     ###########################################################
 
+    - name: Create SQLite database
+
+      run: |
+
+        mkdir -p database
+
+        touch database/database.sqlite
+
     - name: Run Laravel Tests
+
+      env:
+
+        DB_CONNECTION: sqlite
+
+        DB_DATABASE: database/database.sqlite
 
       run: |
 
         php artisan test
+
+    ###########################################################
+    # Reinstall Composer Dependencies (production, no dev)
+    ###########################################################
+
+    - name: Reinstall Composer Dependencies (no dev)
+
+      run: |
+
+        composer install \
+          --no-dev \
+          --prefer-dist \
+          --optimize-autoloader \
+          --no-interaction
 
         ###########################################################
     # Cleanup before packaging
